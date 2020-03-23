@@ -23,7 +23,14 @@ export class Rendertron {
   private host = process.env.HOST || this.config.host;
 
   async createRenderer(config: Config) {
-    const browser = await puppeteer.launch({ args: ['--no-sandbox'] });
+    const args = ['--no-sandbox'];
+    if (process.env.RENDERTRON_HTTP_RPOXY) {
+      args.push('--proxy-server=' + process.env.RENDERTRON_HTTP_RPOXY);
+      console.log('Set HTTP proxy to: ' + process.env.RENDERTRON_HTTP_RPOXY);
+    } else {
+      console.log('Run without HTTP proxy.');
+    }
+    const browser = await puppeteer.launch({ args });
 
     browser.on('disconnected', () => {
       this.createRenderer(config);
@@ -47,12 +54,16 @@ export class Rendertron {
 
     this.app.use(bodyParser());
 
-    this.app.use(route.get('/', async (ctx: Koa.Context) => {
-      await koaSend(
-        ctx, 'index.html', { root: path.resolve(__dirname, '../src') });
-    }));
     this.app.use(
-      route.get('/_ah/health', (ctx: Koa.Context) => ctx.body = 'OK'));
+      route.get('/', async (ctx: Koa.Context) => {
+        await koaSend(ctx, 'index.html', {
+          root: path.resolve(__dirname, '../src')
+        });
+      })
+    );
+    this.app.use(
+      route.get('/_ah/health', (ctx: Koa.Context) => (ctx.body = 'OK'))
+    );
 
     // Optionally enable cache for rendering requests.
     if (this.config.cache === 'datastore') {
@@ -64,11 +75,17 @@ export class Rendertron {
     }
 
     this.app.use(
-      route.get('/render/:url(.*)', this.handleRenderRequest.bind(this)));
-    this.app.use(route.get(
-      '/screenshot/:url(.*)', this.handleScreenshotRequest.bind(this)));
-    this.app.use(route.post(
-      '/screenshot/:url(.*)', this.handleScreenshotRequest.bind(this)));
+      route.get('/render/:url(.*)', this.handleRenderRequest.bind(this))
+    );
+    this.app.use(
+      route.get('/screenshot/:url(.*)', this.handleScreenshotRequest.bind(this))
+    );
+    this.app.use(
+      route.post(
+        '/screenshot/:url(.*)',
+        this.handleScreenshotRequest.bind(this)
+      )
+    );
 
     return this.app.listen(+this.port, this.host, () => {
       console.log(`Listening on port ${this.port}`);
@@ -92,7 +109,7 @@ export class Rendertron {
 
   async handleRenderRequest(ctx: Koa.Context, url: string) {
     if (!this.renderer) {
-      throw (new Error('No renderer initalized yet.'));
+      throw new Error('No renderer initalized yet.');
     }
 
     if (this.restricted(url)) {
@@ -111,14 +128,16 @@ export class Rendertron {
     // Mark the response as coming from Rendertron.
     ctx.set('x-renderer', 'rendertron');
     // Add custom headers to the response like 'Location'
-    serialized.customHeaders.forEach((value: string, key: string) => ctx.set(key, value));
+    serialized.customHeaders.forEach((value: string, key: string) =>
+      ctx.set(key, value)
+    );
     ctx.status = serialized.status;
     ctx.body = serialized.content;
   }
 
   async handleScreenshotRequest(ctx: Koa.Context, url: string) {
     if (!this.renderer) {
-      throw (new Error('No renderer initalized yet.'));
+      throw new Error('No renderer initalized yet.');
     }
 
     if (this.restricted(url)) {
@@ -140,7 +159,11 @@ export class Rendertron {
 
     try {
       const img = await this.renderer.screenshot(
-        url, mobileVersion, dimensions, options);
+        url,
+        mobileVersion,
+        dimensions,
+        options
+      );
 
       for (const key in this.config.headers) {
         ctx.set(key, this.config.headers[key]);
